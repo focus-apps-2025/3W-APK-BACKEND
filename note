@@ -1,0 +1,555 @@
+import 'package:flutter/material.dart';
+import 'package:focus/services/api_service.dart';
+import 'package:focus/services/auth_manager.dart';
+import 'package:focus/models/user.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'dart:math';
+
+// Note: You might need to remove qr_code_scanner from your pubspec.yaml file
+// and add mobile_scanner instead.
+// dependencies:
+//         mobile_scanner: ^5.0.0
+
+class ParsedProductData {
+     final String? partNo;
+     ParsedProductData({this.partNo});
+}
+
+class RackDetailsScreen extends StatefulWidget {
+     final String siteName;
+     const RackDetailsScreen({super.key, required this.siteName});
+     @override
+     State<RackDetailsScreen> createState() => _RackDetailsScreenState();
+}
+
+class _RackDetailsScreenState extends State<RackDetailsScreen> {
+     final _formKey = GlobalKey<FormState>();
+     final ApiService _apiService = ApiService();
+     User? _currentUser;
+     late final TextEditingController _rackNoController,
+              _partNoController,
+              _nextQtyController;
+     String? _selectedLocation;
+     final List<String> _locationOptions = ['Accessories', 'Spares'];
+     bool _isSaving = false;
+     String? _initialLoadError;
+
+     @override
+     void initState() {
+      super.initState();
+      _rackNoController = TextEditingController();
+      _partNoController = TextEditingController();
+      _nextQtyController = TextEditingController();
+      _loadCurrentUser();
+      _requestCameraPermission();
+     }
+
+     @override
+     void dispose() {
+      _rackNoController.dispose();
+      _partNoController.dispose();
+      _nextQtyController.dispose();
+      super.dispose();
+     }
+
+     Future<void> _loadCurrentUser() async {
+      try {
+              _currentUser = await AuthManager().getCurrentUser();
+              if (_currentUser == null) {
+     setState(() => _initialLoadError = 'User not logged in or session expired.');
+              }
+      } catch (e) {
+              setState(() => _initialLoadError = 'Failed to load user data: $e');
+      }
+     }
+
+     Future<void> _requestCameraPermission() async {
+      var status = await Permission.camera.status;
+      if (!status.isGranted) {
+              status = await Permission.camera.request();
+              if (!status.isGranted) {
+     setState(() => _initialLoadError = 'Camera permission denied.');
+              }
+      }
+     }
+void _submitForm() async {
+     if (_initialLoadError != null) {
+      ScaffoldMessenger.of(context)
+     .showSnackBar(SnackBar(content: Text(_initialLoadError!)));
+      return;
+     }
+     if (_currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+     const SnackBar(content: Text('User data not available.')));
+      return;
+     }
+
+     // Add this check to prevent API call if location is not selected
+     if (_selectedLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Please select a location.')),
+      );
+      return;
+     }
+
+     if (_formKey.currentState!.validate()) {
+      setState(() => _isSaving = true);
+      final rackData = {
+              'rackNo': _rackNoController.text,
+              'partNo': _partNoController.text,
+              'nextQty': int.tryParse(_nextQtyController.text),
+              'siteName': widget.siteName,
+              'scannedBy': _currentUser!.id,
+              'location': _selectedLocation, // ADDED THE LOCATION FIELD
+      };
+      try {
+              await _apiService.createRack(rackData);
+              ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('Rack details saved successfully!')));
+              _rackNoController.clear();
+              _partNoController.clear();
+              _nextQtyController.clear();
+              setState(() => _selectedLocation = null);
+      } catch (e) {
+              ScaffoldMessenger.of(context)
+             .showSnackBar(SnackBar(content: Text('Error saving details: $e')));
+      } finally {
+              setState(() => _isSaving = false);
+      }
+     }
+}
+
+     ParsedProductData _parseExtractedData(String scannedValue) {
+      final trimmed = scannedValue.trim();
+      print('Parsing Scanned Value: $trimmed');
+
+      // New logic: Check for the a number prefix followed by an alphanumeric part number
+      final regex = RegExp(r'^\d{6,}([A-Z][A-Z0-9]*)?$');
+      final match = regex.firstMatch(trimmed);
+
+      if (match != null && match.group(1) != null) {
+             final partNo = match.group(1)!;
+             print('Regex-based Part No: $partNo');
+             return ParsedProductData(partNo: partNo);
+      }
+      // Existing logic: Fallback to parsing as a URL with iRcode parameter
+      final uri = Uri.tryParse(trimmed);
+      if (uri != null && uri.hasScheme && uri.queryParameters.containsKey('iRcode')) {
+             final iRcodeValue = uri.queryParameters['iRcode'];
+             print('iRcode Value: $iRcodeValue');
+             if (iRcodeValue != null) {
+              final parts = iRcodeValue.split('-');
+              print('iRcode Parts: $parts');
+              for (var part in parts) {
+    final trimmedPart = part.trim();
+    final match = RegExp(r'[A-Z][A-Z0-9]*').firstMatch(trimmedPart);
+    if (match != null) {
+     final matchedPart = match.group(0)!;
+     print('Matched Part No from iRcode: $matchedPart');
+     return ParsedProductData(partNo: matchedPart);
+    }
+              }
+             }
+      }
+      
+      // Final fallback for a standalone part number like NG890011 or P6300565
+      final partNoMatch = RegExp(r'^[A-Z][A-Z0-9]*$').firstMatch(trimmed);
+      if (partNoMatch != null) {
+             final partNo = partNoMatch.group(0)!;
+             print('Direct Part No: $partNo');
+             return ParsedProductData(partNo: partNo);
+      }
+
+      print('No valid part number found.');
+      return ParsedProductData(partNo: null);
+     }
+
+     void _processScannedAndApply(String scannedValue) {
+      final parsed = _parseExtractedData(scannedValue);
+      if (parsed.partNo != null) {
+              _partNoController.text = parsed.partNo!;
+              ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('Part No. applied: ${parsed.partNo}')));
+      } else {
+              _partNoController.clear();
+              ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('No valid Part No. found.')));
+      }
+     }
+
+     void _showScannerBottomSheet() {
+      showModalBottomSheet(
+              context: context,
+              isDismissible: true,
+              enableDrag: true,
+              builder: (context) => _ScannerModal(onScan: _processScannedAndApply),
+      );
+     }
+
+     @override
+     Widget build(BuildContext context) {
+      if (_initialLoadError != null) {
+              return Scaffold(
+     appBar: AppBar(title: const Text('Error')),
+     body: Center(
+             child: Column(mainAxisSize: MainAxisSize.min, children: [
+           const Icon(Icons.error_outline, color: Colors.red, size: 40),
+           const SizedBox(height: 10),
+           Text(_initialLoadError!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.red)),
+           const SizedBox(height: 20),
+           ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Go Back'))
+             ]),
+     ),
+              );
+      }
+
+      return Scaffold(
+              appBar: AppBar(title: const Text('Rack Details'), centerTitle: true),
+              body: Padding(
+     padding: const EdgeInsets.all(16),
+     child: Form(
+             key: _formKey,
+             child: ListView(children: [
+           Text('Adding Rack to Site: ${widget.siteName}',
+          style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).primaryColor),
+          textAlign: TextAlign.center),
+           const SizedBox(height: 25),
+           DropdownButtonFormField<String>(
+                   value: _selectedLocation,
+                   decoration: const InputDecoration(
+                  labelText: 'Location', border: OutlineInputBorder()),
+                   items: _locationOptions
+                  .map((loc) => DropdownMenuItem(value: loc, child: Text(loc)))
+                  .toList(),
+                   onChanged: (v) => setState(() => _selectedLocation = v),
+                   validator: (v) =>
+                   (v == null || v.isEmpty) ? 'Please select a location.' : null,
+           ),
+           const SizedBox(height: 20),
+           TextFormField(
+                   controller: _rackNoController,
+                   decoration: const InputDecoration(
+                  labelText: 'Rack No.', border: OutlineInputBorder()),
+                   validator: (v) =>
+                   (v == null || v.isEmpty) ? 'Please enter a Rack No.' : null,
+           ),
+           const SizedBox(height: 20),
+           TextFormField(
+                   controller: _partNoController,
+                   decoration: const InputDecoration(
+                  labelText: 'Part No.', border: OutlineInputBorder()),
+                   validator: (v) =>
+                   (v == null || v.isEmpty) ? 'Please enter a Part No.' : null,
+           ),
+           const SizedBox(height: 20),
+           TextFormField(
+                   controller: _nextQtyController,
+                   keyboardType: TextInputType.number,
+                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                   decoration: const InputDecoration(
+                  labelText: 'Next Quantity', border: OutlineInputBorder()),
+                   validator: (v) {
+          if (v == null || v.isEmpty) return 'Please enter a quantity.';
+          final n = int.tryParse(v);
+          return (n == null || n <= 0)
+                ? 'Enter a valid positive number.'
+                : null;
+                   },
+           ),
+           const SizedBox(height: 20),
+           ElevatedButton.icon(
+                   onPressed: _showScannerBottomSheet,
+                   icon: const Icon(Icons.qr_code_scanner),
+                   label: const Text('Scan Barcode/QR Code'),
+                   style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  elevation: 3),
+           ),
+           const SizedBox(height: 30),
+           _isSaving
+          ? const Center(child: CircularProgressIndicator())
+          : ElevatedButton(
+                   onPressed: _submitForm,
+                   style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15)),
+                   child: const Text('Save Rack Details',
+                  style: TextStyle(fontSize: 18)),
+           ),
+             ]),
+     ),
+              ),
+      );
+     }
+}
+
+
+// =============================================================
+// NEW SCANNER MODAL WITH MANUAL ZOOM RE-ADDED
+// =============================================================
+class _ScannerModal extends StatefulWidget {
+     final Function(String) onScan;
+     const _ScannerModal({super.key, required this.onScan});
+     @override
+     State<_ScannerModal> createState() => _ScannerModalState();
+}
+
+class _ScannerModalState extends State<_ScannerModal>
+      with SingleTickerProviderStateMixin {
+     late final MobileScannerController _controller;
+     bool _torchOn = false;
+     bool _scanSuccess = false;
+     double _zoomFactor = 0.0; // Re-added zoom factor state variable
+
+     late AnimationController _scanAnimationController;
+     late Animation<double> _scanAnimation;
+
+     @override
+     void initState() {
+      super.initState();
+      _controller = MobileScannerController(
+              detectionSpeed: DetectionSpeed.noDuplicates,
+              cameraResolution: const Size(640, 480),
+              torchEnabled: _torchOn,
+      );
+
+      _scanAnimationController = AnimationController(
+              vsync: this,
+              duration: const Duration(seconds: 3),
+      )..repeat(reverse: true);
+      _scanAnimation = Tween(begin: 0.0, end: 1.0).animate(
+              CurvedAnimation(
+     parent: _scanAnimationController,
+     curve: Curves.easeInOut,
+              ),
+      );
+     }
+
+     void _onDetect(BarcodeCapture capture) async {
+      final List<Barcode> barcodes = capture.barcodes;
+      if (!_scanSuccess && barcodes.isNotEmpty) {
+              final String? scannedCode = barcodes.first.rawValue;
+
+              if (scannedCode != null) {
+     // Pause the camera and animation on successful scan
+     await _controller.stop();
+     _scanAnimationController.stop();
+
+     setState(() => _scanSuccess = true);
+
+     Future.delayed(const Duration(milliseconds: 500), () {
+             if (mounted) {
+           widget.onScan(scannedCode);
+           Navigator.of(context).pop();
+             }
+     });
+              }
+      }
+     }
+
+     void _toggleTorch() async {
+      await _controller.toggleTorch();
+      setState(() {
+              _torchOn = !_torchOn;
+      });
+     }
+
+     // Re-added _setZoom method for manual control
+     Future<void> _setZoom(double zoom) async {
+      await _controller.setZoomScale(zoom);
+      setState(() {
+              _zoomFactor = zoom;
+      });
+     }
+
+     @override
+     void dispose() {
+      _controller.dispose();
+      _scanAnimationController.dispose();
+      super.dispose();
+     }
+
+     @override
+     Widget build(BuildContext context) {
+      return SizedBox(
+              height: MediaQuery.of(context).size.height * 0.75,
+              child: Stack(
+     children: [
+             MobileScanner(
+           controller: _controller,
+           onDetect: _onDetect,
+           scanWindow: _calculateScanWindow(context),
+             ),
+             _buildScannerOverlay(context),
+             AnimatedContainer(
+           duration: const Duration(milliseconds: 300),
+           color: _scanSuccess
+          ? Colors.green.withOpacity(0.3)
+          : Colors.transparent,
+           child: Center(
+                   child: _scanSuccess
+                  ? const Icon(Icons.check_circle_outline,
+                        color: Colors.white, size: 80)
+                  : Container(),
+           ),
+             ),
+             Positioned(
+           bottom: 0,
+           left: 0,
+           right: 0,
+           child: Container(
+                   color: Colors.black54,
+                   padding: const EdgeInsets.all(16),
+                   child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+                  Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                        IconButton(
+               icon: Icon(
+                       _torchOn ? Icons.flash_on : Icons.flash_off,
+                       color: _torchOn ? Colors.yellow : Colors.white,
+               ),
+               onPressed: _toggleTorch,
+                        ),
+                        const Text(
+               'Align QR Code within the box',
+               style: TextStyle(color: Colors.white),
+                        ),
+                ],
+                  ),
+                  const SizedBox(height: 10),
+                  // The zoom slider for manual control
+                  Row(
+                children: [
+                        const Icon(Icons.zoom_out, color: Colors.white),
+                        Expanded(
+               child: Slider(
+                       value: _zoomFactor,
+                       min: 0.0,
+                       max: 1.0,
+                       onChanged: (value) => _setZoom(value),
+               ),
+                        ),
+                        const Icon(Icons.zoom_in, color: Colors.white),
+                ],
+                  ),
+          ],
+                   ),
+           ),
+             ),
+     ],
+              ),
+      );
+     }
+
+     // Rest of your helper methods and painter classes remain unchanged
+     Rect _calculateScanWindow(BuildContext context) {
+      final constraints = MediaQuery.of(context).size;
+      final size = min(constraints.width, constraints.height * 0.75) * 0.7;
+      final scanRect = Rect.fromCenter(
+              center: Offset(constraints.width / 2, constraints.height * 0.75 / 2),
+              width: size,
+              height: size,
+      );
+      return scanRect;
+     }
+
+     Widget _buildScannerOverlay(BuildContext context) {
+      return LayoutBuilder(
+              builder: (context, constraints) {
+     final size = min(constraints.maxWidth, constraints.maxHeight) * 0.7;
+     final scanRect = Rect.fromCenter(
+             center: Offset(constraints.maxWidth / 2, constraints.maxHeight / 2),
+             width: size,
+             height: size,
+     );
+     return Stack(
+             children: [
+           CustomPaint(
+                   painter: _ScannerOverlayPainter(scanRect),
+                   child: Container(),
+           ),
+           Positioned.fill(
+                   child: AnimatedBuilder(
+          animation: _scanAnimationController,
+          builder: (context, child) {
+                  return CustomPaint(
+                painter: _ScanningLinePainter(
+                        scanRect,
+                        _scanAnimation.value,
+                ),
+                  );
+          },
+                   ),
+           ),
+             ],
+     );
+              },
+      );
+     }
+}
+             // If the barcode is small (e.g., less than 15% of the window) and we are not at max zoom       
+// ... (Your Painter classes remain unchanged)
+class _ScannerOverlayPainter extends CustomPainter {
+     final Rect cutoutRect;
+     _ScannerOverlayPainter(this.cutoutRect);
+
+     @override
+     void paint(Canvas canvas, Size size) {
+      final backgroundPaint = Paint()..color = Colors.black.withOpacity(0.5);
+      final path = Path()
+              ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+              ..addRRect(RRect.fromRectAndRadius(cutoutRect, const Radius.circular(16)))
+              ..fillType = PathFillType.evenOdd;
+      canvas.drawPath(path, backgroundPaint);
+      final borderPaint = Paint()
+              ..color = Colors.white
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3;
+      canvas.drawRRect(
+              RRect.fromRectAndRadius(cutoutRect, const Radius.circular(16)),
+              borderPaint,
+      );
+     }
+
+     @override
+     bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _ScanningLinePainter extends CustomPainter {
+     final Rect scanRect;
+     final double animationValue;
+
+     _ScanningLinePainter(this.scanRect, this.animationValue);
+
+     @override
+     void paint(Canvas canvas, Size size) {
+      final linePaint = Paint()
+              ..color = Colors.red
+              ..strokeWidth = 2
+              ..style = PaintingStyle.stroke;
+      final startY = scanRect.top + animationValue * scanRect.height;
+      canvas.drawLine(
+              Offset(scanRect.left, startY),
+              Offset(scanRect.right, startY),
+              linePaint,
+      );
+     }
+
+     @override
+     bool shouldRepaint(covariant CustomPainter oldDelegate) {
+      return oldDelegate is _ScanningLinePainter &&
+     oldDelegate.animationValue != animationValue;
+     }
+}
