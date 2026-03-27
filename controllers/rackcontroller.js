@@ -117,8 +117,8 @@ exports.createRack = asyncHandler(async (req, res, next) => {
     return res.status(403).json({ success: false, message: 'Not authorized to create rack for this team.' });
   }
 
-  // Get the correct rack model
-  const RackModel = getRackModel(team.auditType);
+  // Get the correct rack model - fallback to TVS if auditType is missing
+  const RackModel = getRackModel(team.auditType || 'TVS');
 
   // FETCH MASTER DESCRIPTION DATA
   let masterData = null;
@@ -145,7 +145,7 @@ exports.createRack = asyncHandler(async (req, res, next) => {
     }
 
     // Update remark for TATA
-    if (remark && team.auditType === 'TATA') {
+    if (remark && (team.auditType || 'TVS') === 'TATA') {
       existingRack.remark = remark;
     }
 
@@ -180,7 +180,7 @@ exports.createRack = asyncHandler(async (req, res, next) => {
     };
 
     // Add remark for TATA
-    if (team.auditType === 'TATA') {
+    if ((team.auditType || 'TVS') === 'TATA') {
       rackData.remark = remark || 'No Remark';
     }
 
@@ -259,8 +259,8 @@ exports.getRacks = asyncHandler(async (req, res, next) => {
 
   // Query each audit type separately
   for (const [auditType, teamIds] of Object.entries(teamsByAuditType)) {
-    const RackModel = getRackModel(auditType);
-    const collectionName = getRackCollectionName(auditType);
+    const RackModel = getRackModel(auditType || 'TVS');
+    const collectionName = getRackCollectionName(auditType || 'TVS');
 
     const matchFilter = { team: { $in: teamIds } };
 
@@ -388,7 +388,7 @@ exports.exportRacks = asyncHandler(async (req, res, next) => {
   }
 
   // Get the correct rack model based on team's auditType
-  const RackModel = getRackModel(team.auditType);
+  const RackModel = getRackModel(team.auditType || 'TVS');
 
   // Build query - FAST pattern (same as downloadRacksAsExcel)
   const query = { team: new mongoose.Types.ObjectId(teamId) };
@@ -660,7 +660,7 @@ exports.getScanCountsByUser = asyncHandler(async (req, res, next) => {
     return res.status(404).json({ success: false, message: 'Team not found.' });
   }
 
-  const RackModel = getRackModel(team.auditType);
+  const RackModel = getRackModel(team.auditType || 'TVS');
 
   const scanCounts = await RackModel.aggregate([
     { $match: { team: new mongoose.Types.ObjectId(teamId) } },
@@ -694,7 +694,7 @@ exports.getFirstScanByUser = async (req, res, next) => {
       return res.status(404).json({ error: 'Team not found' });
     }
 
-    const RackModel = getRackModel(team.auditType);
+    const RackModel = getRackModel(team.auditType || 'TVS');
     const startOfDay = new Date(`${date}T00:00:00.000Z`);
     const endOfDay = new Date(`${date}T23:59:59.999Z`);
 
@@ -754,7 +754,7 @@ exports.getRackByPartNo = asyncHandler(async (req, res, next) => {
   }
 
   // 2. Get the correct rack model
-  const RackModel = getRackModel(team.auditType);
+  const RackModel = getRackModel(team.auditType || 'TVS');
 
   // 3. Find the most recent rack for that partNo WITHIN THAT TEAM
   const rack = await RackModel.findOne({
@@ -784,8 +784,8 @@ exports.downloadRacksAsExcel = asyncHandler(async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Team not found' });
     }
 
-    // Get the correct rack model
-    const RackModel = team.auditType === 'TVS' ? TVSRack : TATARack;
+    // Get the correct rack model - fallback to TVS if auditType is missing
+    const RackModel = (team.auditType || 'TVS') === 'TVS' ? TVSRack : TATARack;
 
     // Build query
     const query = { team: new mongoose.Types.ObjectId(teamId) };

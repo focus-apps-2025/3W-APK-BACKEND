@@ -35,10 +35,10 @@ const TeamSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     }],
-    status: { // e.g., 'active', 'completed', 'archived'
+    status: { // e.g., 'Active', 'Completed', 'Archived'
         type: String,
         enum: ['Active', 'Completed', 'Archived'],
-        default: 'active'
+        default: 'Active'
     }
 }, {
     timestamps: true // Adds createdAt and updatedAt

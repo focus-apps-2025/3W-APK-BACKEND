@@ -44,6 +44,18 @@ const TATARackSchema = new mongoose.Schema({
   materialDescription: {
     type: String,
   },
+  cachedMRP: {
+    type: Number,
+  },
+  cachedNDP: {
+    type: Number,
+  },
+  cachedDescription: {
+    type: String,
+  },
+  lastMasterSync: {
+    type: Date,
+  },
   remark: {
     type: String,
     enum: ['Part number doubtful', 'Without Packing/Label', 'No Remark'],

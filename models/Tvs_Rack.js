@@ -44,6 +44,18 @@ const TVSRackSchema = new mongoose.Schema({
   materialDescription: {
     type: String,
   },
+  cachedMRP: {
+    type: Number,
+  },
+  cachedNDP: {
+    type: Number,
+  },
+  cachedDescription: {
+    type: String,
+  },
+  lastMasterSync: {
+    type: Date,
+  },
 }, {
   timestamps: true,
   collection: 'tvs_racks' // CRITICAL: Explicit collection name
