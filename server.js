@@ -77,6 +77,42 @@ app.get('/', (req, res) => {
   res.send('Server is running.');
 });
 
+// Global error handler middleware - must be after all routes
+app.use((err, req, res, next) => {
+  console.error('Error:', err.message);
+
+  // Mongoose validation error
+  if (err.name === 'ValidationError') {
+    const messages = Object.values(err.errors).map(e => e.message);
+    return res.status(400).json({
+      success: false,
+      message: messages.join('. '),
+    });
+  }
+
+  // Mongoose bad ObjectId
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid ${err.path}: ${err.value}`,
+    });
+  }
+
+  // Mongoose duplicate key
+  if (err.code === 11000) {
+    return res.status(400).json({
+      success: false,
+      message: 'Duplicate field value entered',
+    });
+  }
+
+  // Default 500 error
+  res.status(err.statusCode || 500).json({
+    success: false,
+    message: err.message || 'Internal Server Error',
+  });
+});
+
 // Connect to MongoDB and start server
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
