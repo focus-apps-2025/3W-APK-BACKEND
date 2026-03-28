@@ -83,6 +83,8 @@ exports.checkPartNoInMaster = asyncHandler(async (req, res, next) => {
 exports.createRack = asyncHandler(async (req, res, next) => {
   const { rackNo, partNo, nextQty, siteName, location, remark } = req.body;
 
+  console.log('CREATE RACK REQUEST:', JSON.stringify({ rackNo, partNo, nextQty, siteName, location, remark, userId: req.user?._id, userRole: req.user?.role }));
+
   // Validate required fields
   if (!rackNo || !partNo || nextQty === undefined || !siteName || !location) {
     return res.status(400).json({
@@ -99,12 +101,12 @@ exports.createRack = asyncHandler(async (req, res, next) => {
     });
   }
 
-  // Find the team by siteName
- const team = await Team.findOne({ siteName, status: 'Active' });
+  // Find the team by siteName (case-insensitive status match for compatibility)
+  const team = await Team.findOne({ siteName, status: { $regex: /^active$/i } });
   if (!team) {
     return res.status(404).json({
       success: false,
-      message: `Team with siteName '${siteName}' not found.`,
+      message: `Team with siteName '${siteName}' not found or not active.`,
     });
   }
 

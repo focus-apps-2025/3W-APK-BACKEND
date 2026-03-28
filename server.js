@@ -1,11 +1,21 @@
 const express = require('express');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const mongoose = require('mongoose');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
+
+// Validate required environment variables
+const requiredEnvVars = ['JWT_SECRET', 'REFRESH_TOKEN_SECRET', 'MONGO_URI'];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`FATAL: Missing required environment variable: ${envVar}`);
+    process.exit(1);
+  }
+}
 
 const app = express();
 
@@ -49,9 +59,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true })); // Security: inc
 
 // Security: Rate Limiting
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per `window` (here, per 15 minutes)
-  message: 'Too many login attempts from this IP, please try again after 15 minutes',
+  windowMs: 3* 60 * 1000, // 5 minutes
+  max: 5, // Limit each IP to 5 requests per `window` (here, per 5 minutes)
+  message: 'Too many login attempts from this IP, please try again after 3 minutes',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
@@ -79,7 +89,14 @@ app.get('/', (req, res) => {
 
 // Global error handler middleware - must be after all routes
 app.use((err, req, res, next) => {
-  console.error('Error:', err.message);
+  console.error(' GLOBAL ERROR HANDLER:', {
+    message: err.message,
+    name: err.name,
+    code: err.code,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+  });
 
   // Mongoose validation error
   if (err.name === 'ValidationError') {

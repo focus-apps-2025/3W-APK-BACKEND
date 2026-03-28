@@ -10,7 +10,7 @@ const logger = require('../utils/logger'); // Import Winston logger
 // Helper function to generate JWT token (ensure this is defined if not globally)
 const generateAccessToken = (user) => {
   return jwt.sign({ userId: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: '15m', // Security constraint: Short lived token
+    expiresIn: '15m', // Security constraint: Short lived token (15 minutes)
   });
 };
 // Helper function to generate Refresh Token
